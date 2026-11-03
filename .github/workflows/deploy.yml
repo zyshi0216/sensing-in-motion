@@ -1,423 +1,55 @@
-
-'use strict';
-
-(function () {
-  const $ = id => document.getElementById(id);
-
-  const led = {
-    type: 'led',
-    mode: 'solid',
-    color: '#3478ff',
-    brightness: 60,
-    interval: 800
-  };
-
-  const servo = {
-    type: 'servo',
-    mode: 'hold',
-    angle: 90,
-    min: 45,
-    max: 135,
-    speed: 45
-  };
-
-  let currentAngle = 90;
-  let lastSeen = 0;
-  let lastInteraction = 0;
-  let ledTimer = null;
-  let servoTimer = null;
-  let pollTimer = null;
-  let initialized = false;
-
-  const busy = { led: false, servo: false };
-  const pending = { led: false, servo: false };
-
-  function log(...args) {
-    console.log('[MotionLight]', ...args);
-  }
-
-  function setText(id, value) {
-    const el = $(id);
-    if (el) el.textContent = value;
-  }
-
-  function feedback(message) {
-    setText('feedback', message);
-    log(message);
-  }
-
-  function setOnline(online) {
-    const dot = $('dot');
-    if (dot) dot.classList.toggle('online', online);
-    setText('connection', online ? '设备已连接' : '设备离线');
-  }
-
-  function hexRgb(hex) {
-    return [1, 3, 5].map(i =>
-      parseInt(hex.slice(i, i + 2), 16) || 0
-    );
-  }
-
-  function previewLed() {
-    const now = Date.now();
-    const brightness = led.brightness / 100;
-    let rgb = hexRgb(led.color);
-    let factor = brightness;
-    const interval = Math.max(100, led.interval);
-
-    if (led.mode === 'off') {
-      factor = 0;
-    } else if (led.mode === 'cycle') {
-      rgb = [
-        [255, 0, 0],
-        [0, 255, 0],
-        [0, 0, 255]
-      ][Math.floor(now / interval) % 3];
-    } else if (led.mode === 'blink') {
-      factor = Math.floor(now / interval) % 2 === 0
-        ? brightness : 0;
-    } else if (led.mode === 'breathe') {
-      const phase = (now % (2 * interval)) / interval;
-      factor = brightness *
-        (phase <= 1 ? phase : 2 - phase);
-    }
-
-    const color = '#' + rgb.map(v =>
-      Math.round(v * factor)
-        .toString(16)
-        .padStart(2, '0')
-    ).join('');
-
-    const orb = $('light-orb');
-    if (orb) {
-      orb.style.background = color;
-      orb.style.boxShadow =
-        'inset -13px -18px 25px #0006,' +
-        'inset 8px 9px 20px #fff5,' +
-        '0 0 55px ' + color + 'aa';
-    }
-
-    const glow = $('light-glow');
-    if (glow) glow.style.background = color;
-
-    setText(
-      'light-caption',
-      led.mode.toUpperCase() + ' · ' + led.brightness + '%'
-    );
-  }
-
-  function previewServo() {
-    const angle = Math.max(0, Math.min(180, currentAngle));
-    const theta = (angle - 90) * Math.PI / 180;
-
-    const needle = $('needle');
-    if (needle) {
-      needle.setAttribute(
-        'x2',
-        String(150 + 88 * Math.sin(theta))
-      );
-      needle.setAttribute(
-        'y2',
-        String(152 - 88 * Math.cos(theta))
-      );
-    }
-
-    const progress = $('gauge-progress');
-    if (progress) {
-      progress.setAttribute(
-        'stroke-dashoffset',
-        String(339.3 * (1 - angle / 180))
-      );
-    }
-
-    const readout = $('angle-readout');
-    const strong = readout?.querySelector('strong');
-    if (strong) strong.textContent = angle.toFixed(1) + '°';
-  }
-
-  function syncControls() {
-    const color = $('color');
-    if (color) color.value = led.color;
-
-    setText('color-value', led.color.toUpperCase());
-
-    for (const key of ['brightness', 'interval']) {
-      const el = $(key);
-      if (el) el.value = led[key];
-    }
-
-    setText('brightness-value', led.brightness + '%');
-    setText('interval-value', led.interval + ' ms');
-    setText('led-status', led.mode.toUpperCase());
-
-    document.querySelectorAll('#led-modes button')
-      .forEach(button => {
-        button.classList.toggle(
-          'active',
-          button.dataset.mode === led.mode
-        );
-      });
-
-    for (const key of ['angle', 'min', 'max', 'speed']) {
-      const el = $(key);
-      if (el) el.value = servo[key];
-    }
-
-    setText('angle-value', servo.angle + '°');
-    setText('min-value', servo.min + '°');
-    setText('max-value', servo.max + '°');
-    setText('speed-value', servo.speed + '°/s');
-    setText('servo-status', servo.mode.toUpperCase());
-
-    document.querySelectorAll('#servo-modes button')
-      .forEach(button => {
-        button.classList.toggle(
-          'active',
-          button.dataset.mode === servo.mode
-        );
-      });
-
-    previewLed();
-    previewServo();
-  }
-
-  async function send(kind) {
-    if (busy[kind]) {
-      pending[kind] = true;
-      return;
-    }
-
-    busy[kind] = true;
-
-    try {
-      do {
-        pending[kind] = false;
-
-        const obj = kind === 'led'
-          ? { ...led }
-          : { ...servo };
-
-        const response = await fetch('/api/control', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(obj),
-          cache: 'no-store'
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.ok) {
-          throw new Error(
-            data.error || 'HTTP ' + response.status
-          );
-        }
-
-        lastSeen = Date.now();
-        setOnline(true);
-        feedback('✓ 已同步到 ESP32-S3');
-
-      } while (pending[kind]);
-
-    } catch (error) {
-      feedback('控制失败：' + error.message);
-      console.error('[MotionLight] Control error:', error);
-    } finally {
-      busy[kind] = false;
-    }
-  }
-
-  function queue(kind) {
-    if (kind === 'led') {
-      clearTimeout(ledTimer);
-      ledTimer = setTimeout(() => send('led'), 120);
-    } else {
-      clearTimeout(servoTimer);
-      servoTimer = setTimeout(() => send('servo'), 120);
-    }
-  }
-
-  async function poll() {
-    try {
-      const response = await fetch('/api/status', {
-        cache: 'no-store'
-      });
-
-      if (!response.ok) {
-        throw new Error('HTTP ' + response.status);
-      }
-
-      const data = await response.json();
-
-      if (!data.led || !data.servo) {
-        throw new Error('设备状态格式不正确');
-      }
-
-      lastSeen = Date.now();
-      setOnline(true);
-
-      currentAngle = Number(data.servo.current_angle) || 0;
-
-      if (typeof data.free_heap === 'number') {
-        setText(
-          'heap',
-          'Free heap ' +
-          Math.round(data.free_heap / 1024) +
-          ' KB'
-        );
-      }
-
-      if (Date.now() - lastInteraction > 1800) {
-        Object.assign(led, data.led);
-        Object.assign(servo, data.servo);
-        syncControls();
-      }
-
-    } catch (error) {
-      console.error('[MotionLight] Status error:', error);
-
-      if (Date.now() - lastSeen > 3000) {
-        setOnline(false);
-      }
-
-    } finally {
-      previewServo();
-      pollTimer = setTimeout(poll, 750);
-    }
-  }
-
-  function touched() {
-    lastInteraction = Date.now();
-  }
-
-  function on(id, event, handler) {
-    const el = $(id);
-
-    if (!el) {
-      console.warn('[MotionLight] Missing element:', id);
-      return;
-    }
-
-    el.addEventListener(event, handler);
-  }
-
-  function init() {
-    if (initialized) return;
-    initialized = true;
-
-    log('script initialized');
-
-    on('color', 'input', e => {
-      touched();
-      led.color = e.target.value;
-      led.mode = 'solid';
-      syncControls();
-      queue('led');
-    });
-
-    document.querySelectorAll('.swatch')
-      .forEach(button => {
-        button.addEventListener('click', () => {
-          touched();
-          led.color = button.dataset.color;
-          led.mode = 'solid';
-          syncControls();
-          queue('led');
-        });
-      });
-
-    on('brightness', 'input', e => {
-      touched();
-      led.brightness = Number(e.target.value);
-      syncControls();
-      queue('led');
-    });
-
-    on('interval', 'input', e => {
-      touched();
-      led.interval = Number(e.target.value);
-      syncControls();
-      queue('led');
-    });
-
-    document.querySelectorAll('#led-modes button')
-      .forEach(button => {
-        button.addEventListener('click', () => {
-          touched();
-          led.mode = button.dataset.mode;
-          syncControls();
-          queue('led');
-        });
-      });
-
-    on('angle', 'input', e => {
-      touched();
-      servo.angle = Number(e.target.value);
-      servo.mode = 'hold';
-      currentAngle = servo.angle;
-      syncControls();
-      queue('servo');
-    });
-
-    document.querySelectorAll('.quick-angles button')
-      .forEach(button => {
-        button.addEventListener('click', () => {
-          touched();
-          servo.angle = Number(button.dataset.angle);
-          servo.mode = 'hold';
-          currentAngle = servo.angle;
-          syncControls();
-          queue('servo');
-        });
-      });
-
-    for (const key of ['min', 'max', 'speed']) {
-      on(key, 'input', e => {
-        touched();
-        servo[key] = Number(e.target.value);
-
-        if (servo.min >= servo.max) {
-          if (key === 'min') {
-            servo.max = Math.min(180, servo.min + 1);
-          } else if (key === 'max') {
-            servo.min = Math.max(0, servo.max - 1);
-          }
-        }
-
-        syncControls();
-        queue('servo');
-      });
-    }
-
-    document.querySelectorAll('#servo-modes button')
-      .forEach(button => {
-        button.addEventListener('click', () => {
-          touched();
-          servo.mode = button.dataset.mode;
-          syncControls();
-          queue('servo');
-        });
-      });
-
-    on('stop-servo', 'click', () => {
-      touched();
-      servo.mode = 'hold';
-      servo.angle = Math.round(currentAngle);
-      syncControls();
-      queue('servo');
-    });
-
-    syncControls();
-    setInterval(previewLed, 50);
-
-    log('Starting /api/status polling');
-    poll();
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-})();
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build website
+        run: npm run build
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
