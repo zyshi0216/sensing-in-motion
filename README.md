@@ -1,3 +1,9 @@
+# SWLab Motion Explorer — V2
+
+当前版本已替换为连续蒙皮人体。运行和 GitHub 更新请优先阅读 **UPGRADE_V2.md**。
+
+下方保留第一版操作说明，涉及“程序化拼接人体”“没有外部模型”的描述已被 V2 替代；当前模型与动作来源以 public/ASSET_NOTICES.md 为准。
+
 # SWLab Motion Explorer
 
 38 节点人体动作交互演示。纯前端，无后端、无账号、无真实传感器接入。英文界面。
