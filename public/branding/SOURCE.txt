@@ -1,0 +1,5 @@
+NUS logo: National University of Singapore trademark.
+Image source: https://iconlogovector.com/uploads/images/2024/09/lg-66fa7542d181e-National-University-of-Singapo.webp
+Source page: https://iconlogovector.com/logo/national-university-of-singapore
+Identity reference: https://www.nus.edu.sg/identity/elements-of-the-nus-logo
+The full crest and namestyle are retained. The CSS viewport excludes only transparent outer padding. The image is not relicensed under the application's MIT source-code license.

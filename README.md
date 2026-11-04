@@ -1,3 +1,7 @@
+# Wearable Sensing Explorer — V4
+
+当前为 **100 项动作与变式＋中英文搜索**。请优先阅读 UPDATE_V4.md。旧版文档中的 10 动作描述已被 V4 替代，模型资产和许可说明保持有效。
+
 # SWLab Motion Explorer — V2
 
 当前版本已替换为连续蒙皮人体。运行和 GitHub 更新请优先阅读 **UPGRADE_V2.md**。
